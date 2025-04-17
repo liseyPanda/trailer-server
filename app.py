@@ -17,9 +17,9 @@ def db_connection():
         port=5432
     )
 
-ELASTICSEARCH_URL = "http://elasticsearch:9200"
-HQ_URL = "http://hq:5001/update"
-CLOUD_URL = "http://cloud:5004/update"
+HQ_URL = "https://hq-server-git-kompose-ndrc.apps.osc-hq.hq.ndrc.mil/update"
+CLOUD_URL = "https://cloud-server-git-kompose-ndrc.apps.osc-trailer.trailer.ndrc.mil/update"
+ELASTICSEARCH_URL = "http://elasticsearch-route-kompose-ndrc.apps.osc-trailer.trailer.ndrc.mil";
 
 scheduler = APScheduler()
 latest_events = []
