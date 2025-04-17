@@ -81,8 +81,8 @@
         }
 
         async function sendTrailerUpdate(trailer) {
-            let hqUrl = "http://localhost:5001/update";
-            let cloudUrl = "http://localhost:5004/update";
+            let hqUrl = "http://hq:8080/update";  
+            let cloudUrl = "http://cloud:8080/update";
 
             try {
                 let response = await fetch(hqUrl, {
