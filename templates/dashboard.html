@@ -7,13 +7,118 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+</head>
+<body>
+    <h1>Trailer Dashboard</h1>
+    <table class="table table-striped">
+        <thead class="table-dark">
+            <tr>
+                <th>Trailer ID</th>
+                <th>Status</th>
+                <th>Location</th>
+                <th>Event</th>
+                <th>Last Updated</th>
+            </tr>
+        </thead>
+        <tbody id="events-table"></tbody>
+    </table>
+
+    <h2>Live Trailer Feed</h2>
+    <div id="map" style="height: 500px;"></div>
+
     <script>
+        var map = L.map("map").setView([43.5460, -96.7313], 12);
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+        var markersLayer = L.layerGroup().addTo(map);
+
+        var trailers = [
+            { id: "Trailer-1", name: "Trailer-1", lat: 43.5813, lon: -96.7419, routeIndex: 0 },
+            { id: "Trailer-2", name: "Trailer-2", lat: 43.5460, lon: -96.7313, routeIndex: 0 }
+        ];
+
+        var trailerRoutes = {
+            "Trailer-1": [
+                { lat: 43.5813, lon: -96.7419, name: "Depot A" },
+                { lat: 43.5460, lon: -96.7313, name: "Distribution Center" },
+                { lat: 43.5105, lon: -96.7760, name: "Warehouse B" },
+                { lat: 43.5315, lon: -96.7456, name: "Terminal C" },
+                { lat: 43.4846, lon: -96.7323, name: "Rest Stop" }
+            ],
+            "Trailer-2": [
+                { lat: 43.6103, lon: -96.7200, name: "Depot X" },
+                { lat: 43.5500, lon: -96.7500, name: "Industrial Hub" },
+                { lat: 43.5000, lon: -96.7800, name: "Logistics Center" },
+                { lat: 43.4700, lon: -96.7600, name: "Trailer Stop" },
+                { lat: 43.4600, lon: -96.7400, name: "Downtown Trailer Lot" }
+            ]
+        };
+
+        var markers = {};
+
+        function updateTrailerPositions() {
+            trailers.forEach(trailer => {
+                let trailerRoute = trailerRoutes[trailer.id];
+                trailer.routeIndex = (trailer.routeIndex + 1) % trailerRoute.length;
+                let nextLocation = trailerRoute[trailer.routeIndex];
+
+                trailer.lat = nextLocation.lat;
+                trailer.lon = nextLocation.lon;
+                trailer.event = `Moving to ${nextLocation.name}`;
+
+                if (markers[trailer.id]) {
+                    markers[trailer.id].setLatLng([trailer.lat, trailer.lon])
+                        .bindPopup(`${trailer.name} - ${trailer.event}`)
+                        .openPopup();
+                } else {
+                    markers[trailer.id] = L.marker([trailer.lat, trailer.lon])
+                        .addTo(markersLayer)
+                        .bindPopup(`${trailer.name} - ${trailer.event}`)
+                        .openPopup();
+                }
+
+                sendTrailerUpdate(trailer);
+            });
+        }
+
+        async function sendTrailerUpdate(trailer) {
+            let hqUrl = "http://localhost:5001/update";
+            let cloudUrl = "http://localhost:5004/update";
+
+            try {
+                let response = await fetch(hqUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        truck_id: trailer.id,
+                        status: "in transit",
+                        location: `${trailer.lat}, ${trailer.lon}`,
+                        event: `${trailer.event}`
+                    })
+                });
+                if (!response.ok) throw new Error("HQ is down");
+            } catch (err) {
+                await fetch(cloudUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        truck_id: trailer.id,
+                        status: "in transit",
+                        location: `${trailer.lat}, ${trailer.lon}`,
+                        event: `${trailer.event}`
+                    })
+                });
+            }
+        }
+
         async function fetchTrailerEvents() {
             try {
                 let response = await fetch("/trailer-events");
                 let data = await response.json();
                 let tableBody = document.getElementById("events-table");
-                tableBody.innerHTML = ""; 
+                tableBody.innerHTML = "";
+
+                let latest = {};
+                data.forEach(event => latest[event.truck_id] = event);
 
                 data.forEach(event => {
                     let row = `
@@ -27,78 +132,28 @@
                     `;
                     tableBody.innerHTML += row;
                 });
+
+                Object.values(latest).forEach(trailer => {
+                    let [lat, lon] = trailer.location.split(", ");
+                    if (markers[trailer.truck_id]) {
+                        markers[trailer.truck_id].setLatLng([+lat, +lon])
+                            .bindPopup(`${trailer.truck_id} - ${trailer.status} @ ${trailer.event}`)
+                            .openPopup();
+                    } else {
+                        markers[trailer.truck_id] = L.marker([+lat, +lon])
+                            .addTo(markersLayer)
+                            .bindPopup(`${trailer.truck_id} - ${trailer.status} @ ${trailer.event}`)
+                            .openPopup();
+                    }
+                });
             } catch (error) {
                 console.error("Error fetching trailer events:", error);
             }
         }
 
-        setInterval(fetchTrailerEvents, 5000);  // Refresh data every 5 seconds
-        window.onload = fetchTrailerEvents;  // Load data on page load
-    </script>
-</head>
-<body>
-    <h1>Trailer Dashboard</h1>
-    <table class="table table-striped">
-        <thead class="table-dark">
-            <tr>
-                <th>Truck ID</th>
-                <th>Status</th>
-                <th>Location</th>
-                <th>Event</th>
-                <th>Last Updated</th>
-            </tr>
-        </thead>
-        <tbody id="events-table">
-            <!-- Data will be inserted here dynamically -->
-        </tbody>
-    </table>
-    <!-- <iframe
-        src="{{ kibana_url }}"
-        width="100%"
-        height="800px"
-        frameborder="0"
-        title="Kibana Dashboard"
-    ></iframe> -->
-    <h2>Live Trailer Feed</h2>
-    <div id="map" style="height: 500px;"></div>
-
-    <script>
-        // Initialize map centered on a starting location (HQ or random city)
-        var map = L.map("map").setView([37.7749, -122.4194], 10); // Default: San Francisco
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
-
-        // Truck data (simulate different trucks)
-        var trucks = [
-            { id: 1, name: "Trailer-1", lat: 37.7749, lon: -122.4194 },
-            { id: 2, name: "Trailer-2", lat: 37.7849, lon: -122.4094 },
-            { id: 3, name: "Trailer-3", lat: 37.7649, lon: -122.4294 }
-        ];
-
-        var markers = {}; // Store marker references
-
-        function updateTruckPositions() {
-            trucks.forEach(truck => {
-                // Simulate random movement
-                truck.lat += (Math.random() - 0.5) * 0.01;
-                truck.lon += (Math.random() - 0.5) * 0.01;
-
-                if (!markers[truck.id]) {
-                    // Create marker if it doesn't exist
-                    markers[truck.id] = L.marker([truck.lat, truck.lon]).addTo(map)
-                        .bindPopup(`${truck.name}`);
-                } else {
-                    // Update marker position
-                    markers[truck.id].setLatLng([truck.lat, truck.lon])
-                        .bindPopup(`${truck.name} - Moving`);
-                }
-            });
-        }
-
-        // Initial placement
-        updateTruckPositions();
-
-        // Update truck locations every 3 seconds
-        setInterval(updateTruckPositions, 3000);
+        setInterval(updateTrailerPositions, 10000);
+        setInterval(fetchTrailerEvents, 5000);
+        window.onload = fetchTrailerEvents;
     </script>
 </body>
 </html>
