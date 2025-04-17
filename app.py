@@ -1,42 +1,52 @@
 from flask import Flask, jsonify, render_template
-import requests
 from flask_apscheduler import APScheduler
+import requests
+import psycopg2
+from datetime import datetime
+import threading
 
 app = Flask(__name__)
 
-HQ_URL = "http://hq:5001/get-trailer-events"
+# Database Connection
+def db_connection():
+    return psycopg2.connect(
+        dbname="hq_db",
+        user="hq_user",
+        password="hq_pass",
+        host="hq-db",
+        port=5432
+    )
 
-# trailer specific kibana dashboard url
-KIBANA_URL = "http://localhost:5601/app/dashboards#/view/99fc8f59-f28c-4607-b2b5-8edd5c01153f?_g=(refreshInterval:(pause:!t,value:60000),time:(from:now-15m,to:now))&_a=()"
 ELASTICSEARCH_URL = "http://elasticsearch:9200"
-# Enable auto-reload in development mode
-app.config["TEMPLATES_AUTO_RELOAD"] = True
+HQ_URL = "http://hq:5001/update"
+CLOUD_URL = "http://cloud:5004/update"
 
-# Auto Sync data
 scheduler = APScheduler()
 latest_events = []
 
+@app.route("/")
+def home():
+    return "✅ Trailer Server is up! Dashboard available at /dashboard"
+
 @app.after_request
 def add_header(response):
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
+    response.headers["Cache-Control"] = "no-store"
     return response
 
-@app.route('/')
-def home():
-    return "✅ Trailer is running. Go to /dashboard to view the trailer Kibana dashboard."
-
-# Fetch trailer events from HQ
-def get_trailer_events():
+# Retrieve from Elasticsearch
+@app.route("/trailer-events", methods=["GET"])
+def get_latest_events():
     global latest_events
-    elastic_query = {
+    es_query = {
+        "size": 5,
+        "sort": [{"last_updated": {"order": "desc"}}],
+        "_source": ["truck_id", "status", "location", "event", "last_updated"],
         "query": {
             "wildcard": { "truck_id.keyword": "Trailer-*" }
         }
     }
-    response = requests.get(f"{ELASTICSEARCH_URL}/trucks/_search", json=elastic_query)
 
+    response = requests.get(f"{ELASTICSEARCH_URL}/trucks/_search", json=es_query)
     if response.status_code == 200:
         data = response.json()
         if "hits" in data and "hits" in data["hits"]:
@@ -50,27 +60,52 @@ def get_trailer_events():
                 }
                 for hit in data["hits"]["hits"]
             ]
-            print("Trailer events have been updated 👍")
-        else: 
-            latest_events = []
+            return jsonify(latest_events)
+    return jsonify({"error": "Failed to fetch data"}), 500
 
-    else:
-        print("Failed to sync trailer data from ES ⛔")
-
-# trailer events
-@app.route("/trailer-events", methods=["GET"])
-def get_latest_events():
-    return jsonify(latest_events)
-
-# trailer dashboard
-@app.route('/dashboard')
+@app.route("/dashboard")
 def dashboard():
-    return render_template('dashboard.html', kibana_url=KIBANA_URL)
+    return render_template("dashboard.html")
 
-# schedule
-scheduler.add_job(id="sync_trailer_data", func=get_trailer_events, trigger="interval", seconds=30)
+@scheduler.task("interval", id="sync_trailer", seconds=3)
+def sync_data():
+    get_latest_events()
+
+# Movement simulation (optional)
+def simulate_route():
+    import time
+    route = [
+        {"lat": 43.5813, "lon": -96.7419, "event": "Depot A"},
+        {"lat": 43.5460, "lon": -96.7313, "event": "Distribution Center"},
+        {"lat": 43.5105, "lon": -96.7760, "event": "Warehouse B"},
+        {"lat": 43.5315, "lon": -96.7456, "event": "Terminal C"},
+        {"lat": 43.4846, "lon": -96.7323, "event": "Rest Stop"}
+    ]
+    index = 0
+    trailer_id = "Trailer-1"
+    while True:
+        current = route[index]
+        payload = {
+            "truck_id": trailer_id,
+            "status": "in transit",
+            "location": f"{current['lat']}, {current['lon']}",
+            "event": f"Moving to {current['event']}",
+            "last_updated": datetime.utcnow().isoformat() + "Z"
+        }
+
+        try:
+            res = requests.post(HQ_URL, json=payload, timeout=2)
+            if res.status_code != 201:
+                raise Exception("HQ down")
+        except:
+            requests.post(CLOUD_URL, json=payload)
+
+        index = (index + 1) % len(route)
+        time.sleep(10)
+
 scheduler.init_app(app)
 scheduler.start()
+threading.Thread(target=simulate_route, daemon=True).start()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
