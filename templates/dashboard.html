@@ -81,8 +81,8 @@
         }
 
         async function sendTrailerUpdate(trailer) {
-            let hqUrl = "http://hq:8080/update";  
-            let cloudUrl = "http://cloud:8080/update";
+             let hqUrl = "https://hq-server-git-kompose-ndrc.apps.osc-hq.hq.ndrc.mil/update";  // HQ API
+            let cloudUrl = "https://cloud-server-git-kompose-ndrc.apps.osc-trailer.trailer.ndrc.mil/update";  // Cloud API
 
             try {
                 let response = await fetch(hqUrl, {
